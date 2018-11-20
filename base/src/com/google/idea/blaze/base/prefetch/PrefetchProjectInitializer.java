@@ -15,20 +15,23 @@
  */
 package com.google.idea.blaze.base.prefetch;
 
+import com.google.idea.blaze.base.async.FutureUtil;
 import com.google.idea.blaze.base.model.BlazeProjectData;
 import com.google.idea.blaze.base.projectview.ProjectViewManager;
 import com.google.idea.blaze.base.projectview.ProjectViewSet;
+import com.google.idea.blaze.base.scope.BlazeContext;
 import com.google.idea.blaze.base.scope.Scope;
 import com.google.idea.blaze.base.settings.Blaze;
 import com.google.idea.blaze.base.settings.BlazeImportSettings;
 import com.google.idea.blaze.base.settings.BlazeImportSettingsManager;
 import com.google.idea.blaze.base.sync.data.BlazeProjectDataManagerImpl;
 import com.google.idea.common.experiments.BoolExperiment;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.ApplicationComponent;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
-import com.intellij.openapi.project.ProjectManagerAdapter;
+import com.intellij.openapi.project.ProjectManagerListener;
 import java.io.IOException;
 import javax.annotation.Nullable;
 
@@ -42,30 +45,40 @@ public class PrefetchProjectInitializer implements ApplicationComponent {
 
   @Override
   public void initComponent() {
-    ProjectManager projectManager = ProjectManager.getInstance();
-    projectManager.addProjectManagerListener(
-        new ProjectManagerAdapter() {
-          @Override
-          public void projectOpened(Project project) {
-            if (prefetchOnProjectOpen.getValue()) {
-              prefetchProjectFiles(project);
-            }
-          }
-        });
+    ApplicationManager.getApplication()
+        .getMessageBus()
+        .connect()
+        .subscribe(
+            ProjectManager.TOPIC,
+            new ProjectManagerListener() {
+              @Override
+              public void projectOpened(Project project) {
+                if (prefetchOnProjectOpen.getValue()) {
+                  prefetchProjectFiles(project);
+                }
+              }
+            });
   }
 
   private static void prefetchProjectFiles(Project project) {
     if (!Blaze.isBlazeProject(project)) {
       return;
     }
-    BlazeProjectData projectData = getBlazeProjectData(project);
-    ProjectViewSet projectViewSet = getProjectViewSet(project);
-    if (projectViewSet == null) {
-      return;
-    }
     PrefetchIndexingTask.submitPrefetchingTask(
         project,
-        PrefetchService.getInstance().prefetchProjectFiles(project, projectViewSet, projectData),
+        ApplicationManager.getApplication()
+            .executeOnPooledThread(
+                () -> {
+                  BlazeProjectData projectData = getBlazeProjectData(project);
+                  ProjectViewSet projectViewSet = getProjectViewSet(project);
+                  if (projectViewSet == null) {
+                    return;
+                  }
+                  FutureUtil.waitForFuture(
+                      new BlazeContext(),
+                      PrefetchService.getInstance()
+                          .prefetchProjectFiles(project, projectViewSet, projectData));
+                }),
         "Initial Prefetching");
   }
 

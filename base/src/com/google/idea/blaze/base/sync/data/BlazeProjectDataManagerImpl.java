@@ -67,7 +67,7 @@ public class BlazeProjectDataManagerImpl implements BlazeProjectDataManager {
   private synchronized BlazeProjectData loadProject(BlazeImportSettings importSettings)
       throws IOException {
     File file = getCacheFile(project, importSettings);
-    blazeProjectData = BlazeProjectData.loadFromDisk(file);
+    blazeProjectData = BlazeProjectData.loadFromDisk(importSettings.getBuildSystem(), file);
     return blazeProjectData;
   }
 
